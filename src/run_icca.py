@@ -480,11 +480,11 @@ def main():
     parser.add_argument("--data_dir", type=str, default="ICCA_data")
     parser.add_argument(
         "--spkr_img_mode", type=str, default="PIL"
-    )  # IDEFICS, llava, and Gemini use PIL as the image format; GPT uses URL; Claude uses base64_string. We will support more input formats for the models soon.
+    )  # llava uses PIL as the image format
     parser.add_argument("--lsnr_img_mode", type=str, default="PIL")
     parser.add_argument(
         "--spkr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
-    )  # HuggingFaceM4/idefics-80b-instruct, liuhaotian/llava-v1.5-13b, gpt-4-1106-vision-preview, gemini-pro-vision
+    )  #liuhaotian/llava-v1.5-13b
     parser.add_argument(
         "--lsnr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
     )

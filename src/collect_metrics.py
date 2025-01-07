@@ -205,7 +205,7 @@ def get_mtom_metrics(records_df):
 
 
 exp_type='explicitconsistency'
-model_type='Claude' 
+model_type='LLaVA' 
 output_dir='evaluation_results'
 pred_column='lsnr_pred'
 target_column='tgt_label_for_lsnr'
