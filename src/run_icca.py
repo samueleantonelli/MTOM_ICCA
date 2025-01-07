@@ -18,14 +18,22 @@ def eval_loop(
     lsnr_exp_args,
     spkr_model,
     lsnr_model,
+    spkr_mtom_model,
+    lsnr_mtom_model,
     img_mask,
     img_mask_url=None,
     img_mask_base64=None,
     sleep_time=0,
+    
+    
 ):
     random.seed(random_seed)
     random_seeds = random.sample(range(0, 1000), iters)
     trials_Records = trial_entries[:iters]
+
+
+
+
 
     # prepare the instruction that appears in the beginning of the interaction
     spkr_intro = (
@@ -77,19 +85,63 @@ def eval_loop(
 
             R_t["spkr_trial_fns"] = [img["filename"] for img in spkr_trial_imgs]
 
-            ##############
+        '''
             # query the speaker
             if spkr_exp_args.model_type == "llava":
                 gen_msg = spkr_model.query(spkr_prompt, spkr_trial_imgs).strip()
             else:
                 gen_msg = spkr_model.query(spkr_prompt).strip()
 
-            spkr_trial_prompt = spkr_model.update_with_spkr_pred(
-                spkr_trial_prompt, gen_msg
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+            # Query the speaker's MToM model for feedback
+            spkr_feedback = spkr_mtom_model.query(
+                ["Feedback prompt for MToM"], spkr_trial_imgs
             )
 
-            R_t["spkr_msg"] = gen_msg
+            # Refine the speaker's message with MToM feedback
+            refined_msg = f"{gen_msg} {spkr_feedback}"
+
+            spkr_trial_prompt = spkr_model.update_with_spkr_pred(
+                spkr_trial_prompt, refined_msg
+            )
+
+            R_t["spkr_msg"] = refined_msg
             R_t["tgt_label_for_spkr"] = tgt_label_for_spkr
+
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------'''
+        
+        # Step 1: Speaker generates the initial message
+        if spkr_exp_args.model_type == "llava":
+                gen_msg = spkr_model.query(spkr_prompt, spkr_trial_imgs).strip()
+        else:
+                gen_msg = spkr_model.query(spkr_prompt).strip()
+
+        # Step 2: Speaker MToM model provides feedback on the initial message
+        #spkr_mtom_prompt = [spkr_mtom_model.model_args.intro_text] + spkr_prompt + [gen_msg]
+        spkr_mtom_prompt = [
+        "Evaluate the description. Answer 'its ok'or 'be more precise'",
+        f"Description: {gen_msg}"
+        ]
+
+        spkr_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
+
+        # Step 3: Speaker generates a new refined message incorporating MToM feedback
+        new_prompt = spkr_prompt + [f"Original message: {gen_msg}", f"Feedback: {spkr_feedback}"]
+        refined_msg = spkr_model.query(new_prompt, spkr_trial_imgs).strip()
+
+        # Update the speaker trial prompt with the refined message
+        spkr_trial_prompt = spkr_model.update_with_spkr_pred(spkr_trial_prompt, refined_msg)
+
+        # Save the refined message
+        R_t["spkr_msg"] = refined_msg
+        R_t["tgt_label_for_spkr"] = tgt_label_for_spkr
+        
+        print(f"Trial {t}")
+        print(f"Speaker Initial Message: {gen_msg}")
+        print(f"Speaker MToM Feedback: {spkr_feedback}")
+        print(f"Speaker Refined Message: {refined_msg}")
+
 
         #############
         # listener prompt prep
@@ -137,20 +189,59 @@ def eval_loop(
             R_t["lsnr_trial_fns"] = [img["filename"] for img in lsnr_trial_imgs]
 
             ##############
-            # query the listener
+            '''# query the listener
             if lsnr_exp_args.model_type == "llava":
                 lsnr_pred = lsnr_model.query(
                     lsnr_prompt, lsnr_trial_imgs_lsnr_view
                 ).lower()
             else:
                 lsnr_pred = lsnr_model.query(lsnr_prompt).upper()
-
+            
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
             lsnr_pred = lsnr_pred.strip()
+            
+            lsnr_feedback = lsnr_mtom_model.query(["Feedback prompt for MToM"], lsnr_trial_imgs_lsnr_view)
+
+            final_pred = f"{lsnr_pred} {lsnr_feedback}"
+
+
+            
             lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(
-                lsnr_trial_prompt, lsnr_pred
+                lsnr_trial_prompt, final_pred
             )
             R_t["tgt_label_for_lsnr"] = tgt_label_for_lsnr
-            R_t["lsnr_pred"] = lsnr_pred
+            R_t["lsnr_pred"] = final_pred '''
+
+            # Step 1: Listener generates an initial prediction
+            if lsnr_exp_args.model_type == "llava":
+                lsnr_pred = lsnr_model.query(lsnr_prompt, lsnr_trial_imgs_lsnr_view).lower()
+            else:
+                lsnr_pred = lsnr_model.query(lsnr_prompt).upper()
+
+            # Step 2: Listener MToM model provides feedback on the initial prediction
+            lsnr_mtom_prompt = [
+            "Evaluate the prediction and answer 'I agree' or 'i don't agree'",
+            f"Prediction: {lsnr_pred}"
+            ]
+            lsnr_feedback = lsnr_mtom_model.query(lsnr_mtom_prompt, lsnr_trial_imgs_lsnr_view).strip()
+
+            # Step 3: Listener generates a new refined prediction incorporating MToM feedback
+            new_prompt = lsnr_prompt + [f"Original prediction: {lsnr_pred}", f"Feedback: {lsnr_feedback}"]
+
+            refined_pred = lsnr_model.query(new_prompt, lsnr_trial_imgs_lsnr_view).lower()
+
+            # Update the listener trial prompt with the refined prediction
+            lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(lsnr_trial_prompt, refined_pred)
+
+            # Save the refined prediction
+            R_t["tgt_label_for_lsnr"] = tgt_label_for_lsnr
+            R_t["lsnr_pred"] = refined_pred
+
+            print(f"Listener Initial Prediction: {lsnr_pred}")
+            print(f"Listener MToM Feedback: {lsnr_feedback}")
+            print(f"Listener Refined Prediction: {refined_pred}")
+
+
 
             try:
                 pred_fn = lsnr_trial_imgs[
@@ -158,10 +249,12 @@ def eval_loop(
                 ]["filename"]
             except ValueError:
                 pred_fn = "invalid"
-            lsnr_feedback = lsnr_model.get_lsnr_feedback(
-                lsnr_pred, lsnr_tgt_img, lsnr_trial_imgs, gen_msg
+            lsnr_feedback_final = lsnr_model.get_lsnr_feedback(
+                refined_pred, lsnr_tgt_img, lsnr_trial_imgs, gen_msg
             )
-            lsnr_trial_prompt.append(lsnr_feedback)
+            lsnr_trial_prompt.append(lsnr_feedback_final)
+            
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
         # get speaker feedback
         if spkr_exp_args.model_type != "Human":
@@ -198,6 +291,16 @@ def eval_loop(
         R_t["spkr_trial_record"] = spkr_trial_prompt
         R_t["lsnr_trial_record"] = lsnr_trial_prompt
 
+    spkr_mtom_prompt = [spkr_mtom_model.model_args.intro_text] + spkr_prompt
+    spkr_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs)
+
+    lsnr_mtom_prompt = [lsnr_mtom_model.model_args.intro_text] + lsnr_prompt
+    lsnr_feedback = lsnr_mtom_model.query(lsnr_mtom_prompt, lsnr_trial_imgs_lsnr_view)
+
+    
+
+
+
     return trials_Records, spkr_prompt, lsnr_prompt
 
 
@@ -211,6 +314,14 @@ def run_test(
     lsnr_exp_args,
     spkr_model,
     lsnr_model,
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+    spkr_mtom_model,
+    lsnr_mtom_model,
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
     img_mask,
     img_mask_url=None,
     img_mask_base64=None,
@@ -278,6 +389,14 @@ def run_test(
             lsnr_exp_args=lsnr_exp_args,
             spkr_model=spkr_model,
             lsnr_model=lsnr_model,
+
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+            spkr_mtom_model=spkr_mtom_model,
+            lsnr_mtom_model=lsnr_mtom_model,
+
+            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
             img_mask=img_mask,
             img_mask_url=img_mask_url,
             img_mask_base64=img_mask_base64,
@@ -334,33 +453,40 @@ def run_test(
 
 def main():
     parser = argparse.ArgumentParser()
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+    # Command-line argument, even if we are probably only using one
+    parser.add_argument("--spkr_mtom_ckpt", type=str, default="path_to_spkr_mtom_model")
+    parser.add_argument("--lsnr_mtom_ckpt", type=str, default="path_to_lsnr_mtom_model")
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+
     parser.add_argument(
-        "--spkr_model_type", type=str, default="Claude"
-    )  # IDEFICS, llava, GPT, Gemini, Claude, Human
+        "--spkr_model_type", type=str, default="llava"
+    )  
     parser.add_argument(
-        "--lsnr_model_type", type=str, default="GPT"
-    )  # IDEFICS, llava, GPT, Gemini, Claude, oracle
+        "--lsnr_model_type", type=str, default="llava"
+    )
     parser.add_argument(
         "--spkr_intro_version", type=str, default="simple"
-    )  # any key in the intro_texts_spkr.json file
+    )  
     parser.add_argument("--lsnr_intro_version", type=str, default="standard")
     parser.add_argument(
         "--sleep_time", type=int, default=0
-    )  # sleep between trials for APIs that have a low rate limit
+    )  
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--data_dir", type=str, default="ICCA_data")
     parser.add_argument(
-        "--spkr_img_mode", type=str, default="base64_string"
+        "--spkr_img_mode", type=str, default="PIL"
     )  # IDEFICS, llava, and Gemini use PIL as the image format; GPT uses URL; Claude uses base64_string. We will support more input formats for the models soon.
-    parser.add_argument("--lsnr_img_mode", type=str, default="URL")
-    parser.add_argument("--spkr_API_key", type=str, default="")
-    parser.add_argument("--lsnr_API_key", type=str, default="")
-    parser.add_argument("--organization_ID", type=str, default="")  # for GPT only
+    parser.add_argument("--lsnr_img_mode", type=str, default="PIL")
     parser.add_argument(
-        "--spkr_model_ckpt", type=str, default="claude-3-opus-20240229"
+        "--spkr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
     )  # HuggingFaceM4/idefics-80b-instruct, liuhaotian/llava-v1.5-13b, gpt-4-1106-vision-preview, gemini-pro-vision
     parser.add_argument(
-        "--lsnr_model_ckpt", type=str, default="gpt-4-1106-vision-preview"
+        "--lsnr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
     )
     parser.add_argument(
         "--spkr_intro_texts", type=str, default="args/intro_texts_spkr.json"
@@ -373,7 +499,7 @@ def main():
     )
     parser.add_argument(
         "--img_hosting_site", type=str, default=""
-    )  # to send images to the models as URLs
+    ) 
     parser.add_argument("--exp_name", type=str, default="")
     parser.add_argument(
         "--num_of_trials", type=int, default=24
@@ -386,23 +512,30 @@ def main():
 
     with open(args.lsnr_intro_texts, "r") as f:
         lsnr_intro_texts = json.load(f)
+    
 
-    spkr_intro_text = (
-        None
-        if args.spkr_model_type == "Human"
-        else spkr_intro_texts[args.spkr_model_type][args.spkr_intro_version]
-    )
-    lsnr_intro_text = (
-        None
-        if args.lsnr_model_type == "oracle"
-        else lsnr_intro_texts[args.lsnr_model_type][args.lsnr_intro_version]
-    )
+    # Load MToM-specific prompts
+    with open(args.spkr_intro_texts, "r") as f:
+        spkr_mtom_intro_texts = json.load(f)
+
+    with open(args.lsnr_intro_texts, "r") as f:
+        lsnr_mtom_intro_texts = json.load(f)
+
+
+
+
+    # Extract the relevant prompts for the scenario
+    spkr_intro_text = spkr_intro_texts["llava"][args.spkr_intro_version]
+    lsnr_intro_text = lsnr_intro_texts["llava"][args.lsnr_intro_version]
+    spkr_mtom_intro_text = spkr_mtom_intro_texts["llava"][args.spkr_intro_version]
+    lsnr_mtom_intro_text = lsnr_mtom_intro_texts["llava"][args.lsnr_intro_version]
 
     with open(args.lsnr_exp_args_fp, "r") as f:
         lsnr_exp_args = json.load(f)
 
     spkr_exp_args = InteractionArgs(model_type=args.spkr_model_type)
     lsnr_exp_args = InteractionArgs(model_type=args.lsnr_model_type, **lsnr_exp_args)
+
 
     print("initializing spkr model..")
     match spkr_exp_args.model_type:
@@ -417,68 +550,11 @@ def main():
             )
             spkr_model = LlavaModel(spkr_model_args)
 
-        case "IDEFICS":
-            spkr_model_args = ModelArgs(
-                role="spkr",
-                model_ckpt=args.spkr_model_ckpt,
-                img_mode=args.spkr_img_mode,
-                max_output_tokens=30,
-                label_space=["A", "B", "C", "D"],
-                intro_text=spkr_intro_text,
-            )
-            spkr_model = IDEFICSModel(spkr_model_args)
-
-        case "Gemini":
-            spkr_model_args = ModelArgs(
-                role="spkr",
-                model_ckpt=args.spkr_model_ckpt,
-                img_mode=args.spkr_img_mode,
-                max_output_tokens=30,
-                label_space=["A", "B", "C", "D"],
-                intro_text=spkr_intro_text,
-            )
-            spkr_model = GeminiModel(spkr_model_args, API_key=args.spkr_API_key)
-        case "GPT":
-            spkr_model_args = ModelArgs(
-                role="spkr",
-                model_ckpt=args.spkr_model_ckpt,
-                img_mode=args.spkr_img_mode,
-                max_output_tokens=30,
-                label_space=["A", "B", "C", "D"],
-                intro_text=spkr_intro_text,
-            )
-            spkr_model = GPTModel(
-                spkr_model_args,
-                organization_ID=args.organization_ID,
-                API_key=args.spkr_API_key,
-            )
-
-        case "Claude":
-            spkr_model_args = ModelArgs(
-                role="spkr",
-                model_ckpt=args.spkr_model_ckpt,
-                img_mode=args.spkr_img_mode,
-                max_output_tokens=30,
-                label_space=["A", "B", "C", "D"],
-                intro_text=spkr_intro_text,
-            )
-            spkr_model = ClaudeModel(spkr_model_args, API_key=args.spkr_API_key)
-
         case "Human":
             spkr_model = None
 
     print("initializing lsnr model..")
     match lsnr_exp_args.model_type:
-        case "IDEFICS":
-            lsnr_model_args = ModelArgs(
-                role="lsnr",
-                model_ckpt=args.lsnr_model_ckpt,
-                max_output_tokens=1,
-                img_mode=args.lsnr_img_mode,
-                label_space=["A", "B", "C", "D"],
-                intro_text=lsnr_intro_text,
-            )
-            lsnr_model = IDEFICSModel(lsnr_model_args)
 
         case "llava":
             lsnr_model_args = ModelArgs(
@@ -490,45 +566,37 @@ def main():
                 intro_text=lsnr_intro_text,
             )
             lsnr_model = LlavaModel(lsnr_model_args)
-
-        case "GPT":
-            lsnr_model_args = ModelArgs(
-                role="lsnr",
-                model_ckpt=args.lsnr_model_ckpt,
-                max_output_tokens=1,
-                img_mode=args.lsnr_img_mode,
-                label_space=["A", "B", "C", "D"],
-                intro_text=lsnr_intro_text,
-            )
-            lsnr_model = GPTModel(
-                lsnr_model_args,
-                organization_ID=args.organization_ID,
-                API_key=args.lsnr_API_key,
-            )
-        case "Gemini":
-            lsnr_model_args = ModelArgs(
-                role="lsnr",
-                model_ckpt=args.lsnr_model_ckpt,
-                max_output_tokens=5,
-                img_mode=args.lsnr_img_mode,
-                label_space=["A", "B", "C", "D"],
-                intro_text=lsnr_intro_text,
-            )
-            lsnr_model = GeminiModel(lsnr_model_args, API_key=args.lsnr_API_key)
-
-        case "Claude":
-            lsnr_model_args = ModelArgs(
-                role="lsnr",
-                model_ckpt=args.lsnr_model_ckpt,
-                max_output_tokens=1,
-                img_mode=args.lsnr_img_mode,
-                label_space=["A", "B", "C", "D"],
-                intro_text=lsnr_intro_text,
-            )
-            lsnr_model = ClaudeModel(lsnr_model_args, API_key=args.lsnr_API_key)
-
+            
         case "oracle":
             lsnr_model = None
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
+
+    # Initialize MToM Models, like the others
+    print("initializing MToM models...")
+    spkr_mtom_model = LlavaModel(
+        ModelArgs(
+            role="spkr_mtom",
+            model_ckpt="liuhaotian/llava-v1.6-vicuna-7b",
+            max_output_tokens=30,
+            img_mode="PIL",
+            label_space=["top left", "top right", "bottom left", "bottom right"],
+            intro_text=spkr_mtom_intro_text
+        )
+    )
+
+    lsnr_mtom_model = LlavaModel(
+        ModelArgs(
+            role="lsnr_mtom",
+            model_ckpt="liuhaotian/llava-v1.6-vicuna-7b",
+            max_output_tokens=15,
+            img_mode="PIL",
+            label_space=["top left", "top right", "bottom left", "bottom right"],
+            intro_text=lsnr_mtom_intro_text
+    )
+    )
+
+    #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
     if lsnr_exp_args.img_mask:
         img_mask = Image.new("RGB", (256, 256), color=(0, 0, 0))
@@ -565,6 +633,8 @@ def main():
         lsnr_exp_args=lsnr_exp_args,
         spkr_model=spkr_model,
         lsnr_model=lsnr_model,
+        spkr_mtom_model=spkr_mtom_model,
+        lsnr_mtom_model=lsnr_mtom_model,
         img_mask=img_mask,
         img_mask_url=img_mask_url,
         img_mask_base64=img_mask_base64,

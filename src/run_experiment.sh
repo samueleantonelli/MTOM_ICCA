@@ -1,16 +1,16 @@
 python run_icca.py \
-    --spkr_model_type "Claude" \
-    --lsnr_model_type "GPT" \
+    --spkr_model_type "llava" \
+    --lsnr_model_type "llava" \
     --spkr_intro_version "simple" \
     --lsnr_intro_version "standard" \
     --data_dir "ICCA_data" \
-    --spkr_img_mode "base64_string" \
-    --lsnr_img_mode "URL" \
+    --spkr_img_mode "PIL" \
+    --lsnr_img_mode "PIL" \
     --spkr_API_key "" \
     --lsnr_API_key "" \
     --organization_ID "" \
-    --spkr_model_ckpt "claude-3-opus-20240229" \
-    --lsnr_model_ckpt "gpt-4-1106-vision-preview" \
+    --spkr_model_ckpt "liuhaotian/llava-v1.6-vicuna-7b" \
+    --lsnr_model_ckpt "liuhaotian/llava-v1.6-vicuna-7b" \
     --spkr_intro_texts "args/intro_texts_spkr.json" \
     --lsnr_intro_texts "args/intro_texts_lsnr.json" \
     --lsnr_exp_args_fp "args/interaction_args_lsnr.json" \
