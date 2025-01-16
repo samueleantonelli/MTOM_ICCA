@@ -9,6 +9,7 @@ from sklearn.metrics import classification_report
 from MLLMs import *
 
 
+
 def eval_loop(
     trial_entries,
     context_imgs,
@@ -30,8 +31,6 @@ def eval_loop(
     random.seed(random_seed)
     random_seeds = random.sample(range(0, 1000), iters)
     trials_Records = trial_entries[:iters]
-
-
 
 
 
@@ -84,52 +83,37 @@ def eval_loop(
             )
 
             R_t["spkr_trial_fns"] = [img["filename"] for img in spkr_trial_imgs]
-
-        '''
-            # query the speaker
-            if spkr_exp_args.model_type == "llava":
-                gen_msg = spkr_model.query(spkr_prompt, spkr_trial_imgs).strip()
-            else:
-                gen_msg = spkr_model.query(spkr_prompt).strip()
-
-            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
-
-            # Query the speaker's MToM model for feedback
-            spkr_feedback = spkr_mtom_model.query(
-                ["Feedback prompt for MToM"], spkr_trial_imgs
-            )
-
-            # Refine the speaker's message with MToM feedback
-            refined_msg = f"{gen_msg} {spkr_feedback}"
-
-            spkr_trial_prompt = spkr_model.update_with_spkr_pred(
-                spkr_trial_prompt, refined_msg
-            )
-
-            R_t["spkr_msg"] = refined_msg
-            R_t["tgt_label_for_spkr"] = tgt_label_for_spkr
-
-            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------'''
         
+        
+        #SPEAKER PIPELINE
         # Step 1: Speaker generates the initial message
         if spkr_exp_args.model_type == "llava":
                 gen_msg = spkr_model.query(spkr_prompt, spkr_trial_imgs).strip()
         else:
                 gen_msg = spkr_model.query(spkr_prompt).strip()
 
-        # Step 2: Speaker MToM model provides feedback on the initial message
-        #spkr_mtom_prompt = [spkr_mtom_model.model_args.intro_text] + spkr_prompt + [gen_msg]
-        spkr_mtom_prompt = [
-        "Evaluate the description. Answer 'its ok'or 'be more precise'",
-        f"Description: {gen_msg}"
-        ]
+        # Include speaker history in the MToM prompt
+        spkr_history = [entry["spkr_trial_record"] for entry in trials_Records[:t]] if t > 0 else []
+        spkr_history_flat = list(chain.from_iterable(spkr_history))  # Flatten history
 
-        spkr_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
+        # Step 2: Speaker MToM model provides feedback on the initial message
+        spkr_mtom_prompt = [
+        "Play a game with me, a third player (the speaker) and a fourth player (the listener). This game consists of multiple rounds in which you interact with me and a speaker on the same collage of 4 images. In each round, I will refer to one of the images as the target, by saying their location in the collage. The speaker will generate a message to communicate the target to the listener without mentioning this location. The listener will then guess the target. You will read the speaker's description of the image and suggest some impovements in order to make it more informative about informations not mentioned. \n\nFocus on the content of the images, not their locations in the collage. In other words, don't include phrases like top left, top right, bottom left, bottom right in your message. Keep each message under 20 words. Your reply should only contain your message.",
+        f"Description: {gen_msg}"
+        ] + spkr_history_flat
+
+        speaker_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
 
         # Step 3: Speaker generates a new refined message incorporating MToM feedback
-        new_prompt = spkr_prompt + [f"Original message: {gen_msg}", f"Feedback: {spkr_feedback}"]
-        refined_msg = spkr_model.query(new_prompt, spkr_trial_imgs).strip()
+        speaker_MToM_addon_prompt = [
+        "You are playing a game with me a third player (the listener) and a fourth player. This game consists of multiple rounds in which you interact with me the listener and the fourth player on the same collage of 4 images. In each round, I will refer to one of the images as the target, by saying their location in the collage. You should generate a message to communicate the target to the listener without mentioning this location. You will recive also a previous description you generated and a feadback on it from the fourth player. Generate a new description considering the other player feedback. The listener will then guess the target. I will tell you which image the listener guessed so you may adjust your message based on the listener's performance.\n\nFocus on the content of the images, not their locations in the collage. In other words, don't include phrases like top left, top right, bottom left, bottom right in your message. Keep each message under 20 words. Your reply should only contain your message.",
 
+        ]
+        new_promptS = speaker_MToM_addon_prompt + [f"Previous description: {gen_msg}", f"Other player Feedback: {speaker_feedback}"]
+        refined_msg = spkr_model.query(new_promptS, spkr_trial_imgs).strip()
+
+
+       
         # Update the speaker trial prompt with the refined message
         spkr_trial_prompt = spkr_model.update_with_spkr_pred(spkr_trial_prompt, refined_msg)
 
@@ -137,10 +121,17 @@ def eval_loop(
         R_t["spkr_msg"] = refined_msg
         R_t["tgt_label_for_spkr"] = tgt_label_for_spkr
         
+        print("\n")
+        
+        print("---------------------------------------------------------------------- \n")
+        
         print(f"Trial {t}")
         print(f"Speaker Initial Message: {gen_msg}")
-        print(f"Speaker MToM Feedback: {spkr_feedback}")
-        print(f"Speaker Refined Message: {refined_msg}")
+        print(f"Speaker MToM Feedback: {speaker_feedback}")
+        print(f"Speaker Refined Message: {refined_msg}\n")
+        
+
+
 
 
         #############
@@ -175,7 +166,7 @@ def eval_loop(
                 t,
                 lsnr_context_imgs,
                 tgt_fn,
-                msg=gen_msg,
+                msg=refined_msg,
                 records=trials_Records,
                 random_seed=random_seeds[t],
                 no_history=lsnr_exp_args.no_history,
@@ -188,47 +179,34 @@ def eval_loop(
 
             R_t["lsnr_trial_fns"] = [img["filename"] for img in lsnr_trial_imgs]
 
-            ##############
-            '''# query the listener
-            if lsnr_exp_args.model_type == "llava":
-                lsnr_pred = lsnr_model.query(
-                    lsnr_prompt, lsnr_trial_imgs_lsnr_view
-                ).lower()
-            else:
-                lsnr_pred = lsnr_model.query(lsnr_prompt).upper()
             
-            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
-            lsnr_pred = lsnr_pred.strip()
-            
-            lsnr_feedback = lsnr_mtom_model.query(["Feedback prompt for MToM"], lsnr_trial_imgs_lsnr_view)
-
-            final_pred = f"{lsnr_pred} {lsnr_feedback}"
-
-
-            
-            lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(
-                lsnr_trial_prompt, final_pred
-            )
-            R_t["tgt_label_for_lsnr"] = tgt_label_for_lsnr
-            R_t["lsnr_pred"] = final_pred '''
-
+            #LISTENER PIPELINE
             # Step 1: Listener generates an initial prediction
             if lsnr_exp_args.model_type == "llava":
                 lsnr_pred = lsnr_model.query(lsnr_prompt, lsnr_trial_imgs_lsnr_view).lower()
             else:
                 lsnr_pred = lsnr_model.query(lsnr_prompt).upper()
 
+            # Include listener history in the MToM prompt
+            lsnr_history = [entry["lsnr_trial_record"] for entry in trials_Records[:t]] if t > 0 else []
+            lsnr_history_flat = list(chain.from_iterable(lsnr_history))  # Flatten history
+
             # Step 2: Listener MToM model provides feedback on the initial prediction
             lsnr_mtom_prompt = [
-            "Evaluate the prediction and answer 'I agree' or 'i don't agree'",
-            f"Prediction: {lsnr_pred}"
-            ]
+            "you will play a game with multiple rounds involving the same set of images. In each round, you will recive the description made by another player (the speaker) and the prediction made by another player (the listener). In each round, check the speaker description, the listener prediction and the images. Each round you will generate a feedback on the listener choice, saying why you agree or disagree. Keep the answer under 30 words.",
+            f"Speaker description: {refined_msg}"
+            f"Listener prediction: {lsnr_pred}"
+            ] + lsnr_history_flat
             lsnr_feedback = lsnr_mtom_model.query(lsnr_mtom_prompt, lsnr_trial_imgs_lsnr_view).strip()
 
             # Step 3: Listener generates a new refined prediction incorporating MToM feedback
-            new_prompt = lsnr_prompt + [f"Original prediction: {lsnr_pred}", f"Feedback: {lsnr_feedback}"]
+            
+            listener_MToM_addon_prompt = [
+            " you are playing a game with multiple rounds involving the same set of images. In each round, you will recive the description of the target image, your original prediction and a feedback about it coming from another player that can agree or disagree with it. You will guess again which image the description is referring to taking in account the feedback from the other player . If present, the history of previous rounds may help you better understand how I refer to specific images. In each round, answer with the image's location in the collage, i.e. top left, top right, bottom left, bottom right.",
+            ]
+            new_promptL = listener_MToM_addon_prompt + [f"Target image description: {refined_msg}", f"Original prediction: {lsnr_pred}", f"Feedback: {lsnr_feedback}"]
 
-            refined_pred = lsnr_model.query(new_prompt, lsnr_trial_imgs_lsnr_view).lower()
+            refined_pred = lsnr_model.query(new_promptL, lsnr_trial_imgs_lsnr_view).lower()
 
             # Update the listener trial prompt with the refined prediction
             lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(lsnr_trial_prompt, refined_pred)
@@ -240,6 +218,8 @@ def eval_loop(
             print(f"Listener Initial Prediction: {lsnr_pred}")
             print(f"Listener MToM Feedback: {lsnr_feedback}")
             print(f"Listener Refined Prediction: {refined_pred}")
+
+
 
 
 
@@ -269,7 +249,7 @@ def eval_loop(
         if spkr_exp_args.model_type != "Human":
             things_to_print.extend(
                 [
-                    {"Gen_msg": gen_msg},
+                    {"Gen_msg": refined_msg},
                     {"Human_msg": human_msg},
                     {"Tgt_fn": spkr_tgt_img["filename"]},
                 ]
@@ -281,7 +261,7 @@ def eval_loop(
             things_to_print.extend(
                 [
                     {"Pred_fn": pred_fn},
-                    {"Pred_label": lsnr_pred},
+                    {"Pred_label": refined_pred},
                     {"Tgt_label": tgt_label_for_lsnr},
                 ]
             )
@@ -290,12 +270,42 @@ def eval_loop(
 
         R_t["spkr_trial_record"] = spkr_trial_prompt
         R_t["lsnr_trial_record"] = lsnr_trial_prompt
+            
+        print("\n")
+        print(f"Trial {t} DEBUG \n")
+
+        print("SPEAKER")
+        print(f"Speaker Prompt 1: {spkr_prompt}\n")
+        print(f"Speaker message 1: {gen_msg}\n\n")
+        
+        print(f"SpeakerMToM prompt: {spkr_mtom_prompt}\n")
+        print(f"SpeakerMToM message: {speaker_feedback}\n\n")
+        
+        
+        print(f"Speaker Prompt 2: {new_promptS}\n")
+        print(f"Speaker Refined Message: {refined_msg}\n\n")
+
+        print("LISTENER")
+        print(f"Listener Prompt 1: {lsnr_prompt}\n")
+        print(f"Listener message 1: {lsnr_pred}\n\n")
+        
+        print(f"ListenerMToM prompt: {lsnr_mtom_prompt}\n")
+        print(f"ListenerMToM message: {lsnr_feedback}\n\n")
+        
+        
+        print(f"Listener Prompt 2: {new_promptL}\n")
+        print(f"Listener final answer: {refined_pred}\n\n")
+
+
+
+        print("---------------------------------------------------------------------- \n")
 
     spkr_mtom_prompt = [spkr_mtom_model.model_args.intro_text] + spkr_prompt
     spkr_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs)
 
     lsnr_mtom_prompt = [lsnr_mtom_model.model_args.intro_text] + lsnr_prompt
     lsnr_feedback = lsnr_mtom_model.query(lsnr_mtom_prompt, lsnr_trial_imgs_lsnr_view)
+
 
     
 
@@ -484,7 +494,7 @@ def main():
     parser.add_argument("--lsnr_img_mode", type=str, default="PIL")
     parser.add_argument(
         "--spkr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
-    )  #liuhaotian/llava-v1.5-13b
+    )  
     parser.add_argument(
         "--lsnr_model_ckpt", type=str, default="liuhaotian/llava-v1.6-vicuna-7b"
     )
@@ -502,7 +512,7 @@ def main():
     ) 
     parser.add_argument("--exp_name", type=str, default="")
     parser.add_argument(
-        "--num_of_trials", type=int, default=24
+        "--num_of_trials", type=int, default=5
     )  # can use smaller numbers for debugging
 
     args = parser.parse_args()
@@ -589,7 +599,7 @@ def main():
         ModelArgs(
             role="lsnr_mtom",
             model_ckpt="liuhaotian/llava-v1.6-vicuna-7b",
-            max_output_tokens=15,
+            max_output_tokens=30,
             img_mode="PIL",
             label_space=["top left", "top right", "bottom left", "bottom right"],
             intro_text=lsnr_mtom_intro_text
