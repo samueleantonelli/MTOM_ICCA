@@ -154,9 +154,9 @@ class ModelWrapper(ABC):
 class LlavaModel(ModelWrapper):
     def __init__(self, model_args, loaded_model=None):
         self.model_args = model_args
-        from llava.model.builder import load_pretrained_model
-        from llava.mm_utils import get_model_name_from_path
-        from llava.eval.run_llava import eval_model
+        from MTOM_ICCA.LLaVA.llava.model.builder import load_pretrained_model
+        from MTOM_ICCA.LLaVA.llava.mm_utils import get_model_name_from_path
+        from MTOM_ICCA.LLaVA.llava.eval.run_llava import eval_model
 
         self.eval_model = eval_model
 
