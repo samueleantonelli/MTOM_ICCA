@@ -1,4 +1,9 @@
 # %%
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import pandas as pd
 import glob, os, io, random, json, time, argparse, copy, base64, pickle
 from datetime import datetime
@@ -87,7 +92,7 @@ def eval_loop(
             R_t["spkr_trial_fns"] = [img["filename"] for img in spkr_trial_imgs]
         
         # Load MToM prompts
-        mtom_prompts_path = "/mnt/cimec-storage6/users/simone.baratella/GLPCOND/MTOM_ICCA/src/args/mtom_prompts.json"
+        mtom_prompts_path = "/mnt/cimec-storage6/users/samuele.antonelli/mtomicca/MTOM_ICCA/src/args/mtom_prompts.json"
         with open(mtom_prompts_path, "r") as f:
             mtom_prompts = json.load(f)
 
