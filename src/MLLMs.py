@@ -228,8 +228,7 @@ class LlavaModel(ModelWrapper):
 
         gen_msg, _ = self.eval_model(args)
 
-        if feedback:
-            gen_msg = f"{gen_msg} {feedback.strip()}"
+
 
         return gen_msg
 

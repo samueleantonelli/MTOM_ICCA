@@ -1,4 +1,9 @@
 # %%
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import pandas as pd
 import glob, os, io, random, json, time, argparse, copy, base64, pickle
 from datetime import datetime
@@ -7,6 +12,7 @@ from utils import *
 from tqdm import tqdm
 from sklearn.metrics import classification_report
 from MLLMs import *
+from itertools import chain
 
 
 
@@ -20,23 +26,21 @@ def eval_loop(
     spkr_model,
     lsnr_model,
     spkr_mtom_model,
-    lsnr_mtom_model,
     img_mask,
     img_mask_url=None,
     img_mask_base64=None,
     sleep_time=0,
     args=None,
-    
-    
 ):
+
+    
+
     random.seed(random_seed)
     random_seeds = random.sample(range(0, 1000), iters)
     trials_Records = trial_entries[:iters]
-    condition = args.condition
+    condition = args.condition if args else "base"
 
-
-
-    # prepare the instruction that appears in the beginning of the interaction
+    # Intro
     spkr_intro = (
         spkr_model.get_spkr_intro(context_imgs)
         if spkr_exp_args.model_type != "Human"
@@ -54,20 +58,23 @@ def eval_loop(
         )
     else:
         lsnr_context_imgs = context_imgs.copy()
-        random.shuffle(
-            lsnr_context_imgs
-        )  # speaker and listener see the images in potentially different orders
+        random.shuffle(lsnr_context_imgs)
 
     for t, R_t in enumerate(trials_Records):
         if t != 0:
             time.sleep(sleep_time)
+
         tgt_fn = R_t["targetImg"]
         human_msg = R_t["msg"]
 
+        # speaker prompt logic
         if spkr_exp_args.model_type == "Human":
             gen_msg = human_msg
             spkr_trial_prompt = []
             spkr_prompt = []
+            spkr_tgt_img = None
+            tgt_label_for_spkr = None
+            spkr_trial_imgs = []
         else:
             (
                 spkr_prompt,
@@ -85,88 +92,102 @@ def eval_loop(
             )
 
             R_t["spkr_trial_fns"] = [img["filename"] for img in spkr_trial_imgs]
-        
-        # Load MToM prompts
-        mtom_prompts_path = "/mnt/cimec-storage6/users/simone.baratella/GLPCOND/MTOM_ICCA/src/args/mtom_prompts.json"
-        with open(mtom_prompts_path, "r") as f:
-            mtom_prompts = json.load(f)
 
-        # Get prompts for the selected condition
-        condition = args.condition
-        if condition not in mtom_prompts:
-            raise ValueError(f"Condition '{condition}' not found in mtom_prompts.json")
-
-        selected_prompts = mtom_prompts[condition]
-
-        
-        
-        #SPEAKER PIPELINE
-        # Step 1: Speaker generates the initial message
-        if spkr_exp_args.model_type == "llava":
+            # SPEAKER Step 1: Speaker's first queue
+            if spkr_exp_args.model_type == "llava":
                 gen_msg = spkr_model.query(spkr_prompt, spkr_trial_imgs).strip()
-        else:
+            else:
                 gen_msg = spkr_model.query(spkr_prompt).strip()
 
-        # Include speaker history in the MToM prompt
-        spkr_history = [entry["spkr_trial_record"] for entry in trials_Records[:t]] if t > 0 else []
-        spkr_history_flat = list(chain.from_iterable(spkr_history))  # Flatten history
+        # MToM pipeline
+        if spkr_exp_args.model_type != "Human":
+            
+            # Gather all previous speaker trial records [0..t-1], Then keep only the last 5 rounds to avoid super-long prompt
+            if t > 0:
+                spkr_history_all = [entry["spkr_trial_record"] for entry in trials_Records[:t]]
+            else:
+                spkr_history_all = []
 
-        # Step 2: Speaker MToM model provides feedback on the initial message
-        spkr_mtom_prompt = [
-            selected_prompts["spkr_mtom_prompt"],
-            f"Description: {gen_msg}"
-        ] + spkr_history_flat
+            # flatten each set of lines
+            spkr_history_flat = list(chain.from_iterable(spkr_history_all))
 
-        speaker_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
+            # limit to last 5 "round blocks" (not lines).
+            # Each round block is spkr_trial_record: a list of strings. 
+            # We'll do it round by round, not line by line:
+            # if we have N rounds in spkr_history_all, keep only the last 5
+            if len(spkr_history_all) > 5:
+                spkr_history_all = spkr_history_all[-5:]
+                spkr_history_flat = list(chain.from_iterable(spkr_history_all))
 
-        # Step 3: Speaker generates a new refined message incorporating MToM feedback
-        speaker_MToM_addon_prompt = [
-            selected_prompts["spkr_mtom_addon"],
-            f"Previous description: {gen_msg}",
-            f"Other player Feedback: {speaker_feedback}"
-        ] + spkr_history_flat
+            # Step 2: MToM feedback
+            # Build MToM prompt the same way, but with truncated history
+            mtom_prompts_path = "/mnt/cimec-storage6/users/simone.baratella/GLPCOND/MTOM_ICCA/src/args/mtom_prompts.json"
+            with open(mtom_prompts_path, "r") as f:
+                mtom_prompts = json.load(f)
 
-        refined_msg = spkr_model.query(speaker_MToM_addon_prompt, spkr_trial_imgs).strip()
+            condition_val = args.condition
+            if condition_val not in mtom_prompts:
+                raise ValueError(f"Condition '{condition_val}' not found in mtom_prompts.json")
+
+            selected_prompts = mtom_prompts[condition_val]
+
+            spkr_mtom_prompt = [
+                selected_prompts["spkr_mtom_prompt"]
+            ] + spkr_history_flat
+
+            spkr_mtom_prompt.append(f"Description: {gen_msg}")
+
+            spkr_mtom_prompt.append("My short feedback on this description is: ")
+
+            speaker_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
+
+            # Step 3: refine
+            speaker_MToM_addon_prompt = [
+                selected_prompts["spkr_mtom_addon"],
+            ] + spkr_history_flat
+
+            speaker_MToM_addon_prompt.append(f"Previous description: {gen_msg}")
+            
+            speaker_MToM_addon_prompt.append(f"Other player Feedback: {speaker_feedback}")
+            
+            speaker_MToM_addon_prompt.append("implementing the feedback my final description is: ")
+
+                                             
 
 
-       
-        # Update the speaker trial prompt with the refined message
-        spkr_trial_prompt = spkr_model.update_with_spkr_pred(spkr_trial_prompt, refined_msg)
+            refined_msg = spkr_model.query(speaker_MToM_addon_prompt, spkr_trial_imgs).strip()
 
-        # Save the refined message
+            # Update the speaker trial prompt with the refined message
+            spkr_trial_prompt = spkr_model.update_with_spkr_pred(spkr_trial_prompt, refined_msg)
+
+        else:
+            speaker_feedback = ""
+            refined_msg = gen_msg
+
+        # Save final speaker message
         R_t["spkr_msg"] = refined_msg
         R_t["tgt_label_for_spkr"] = tgt_label_for_spkr
-        
-        print("\n")
-        
-        print("---------------------------------------------------------------------- \n")
-        
-        print(f"Trial {t}")
+
+        print("\n---------------------------------------------------------------------- \n")
+        print(f"Trial {t+1}")
         print(f"Speaker Initial Message: {gen_msg}")
         print(f"Speaker MToM Feedback: {speaker_feedback}")
         print(f"Speaker Refined Message: {refined_msg}\n")
-        
 
-
-
-
-        #############
-        # listener prompt prep
+        # ---- LISTENER pipeline
         if lsnr_exp_args.model_type == "oracle":
             pred_fn, lsnr_trial_prompt, R_t["tgt_label_for_lsnr"], R_t["lsnr_pred"] = (
-                spkr_tgt_img["filename"],
+                spkr_tgt_img["filename"] if spkr_tgt_img else tgt_fn,
                 [],
                 tgt_label_for_spkr,
                 tgt_label_for_spkr,
             )
             lsnr_prompt = []
-            # R_t['lsnr_pred']=lsnr_pred
         else:
             omit_img = True if (lsnr_exp_args.img_once and t > 0) else False
-
             if t in lsnr_exp_args.misleading_trials:
                 misleading = True
-                omit_img = False  # override the omit_img
+                omit_img = False
             else:
                 misleading = False
 
@@ -191,86 +212,43 @@ def eval_loop(
                 misleading=misleading,
                 has_intro=lsnr_exp_args.has_intro,
             )
-            # lsnr_trial_imgs_lsnr_view is different from lsnr_trial_imgs for experiments that have misleading manipulations
 
             R_t["lsnr_trial_fns"] = [img["filename"] for img in lsnr_trial_imgs]
 
-            
-            #LISTENER PIPELINE
-            # Step 1: Listener generates an initial prediction
             if lsnr_exp_args.model_type == "llava":
                 lsnr_pred = lsnr_model.query(lsnr_prompt, lsnr_trial_imgs_lsnr_view).lower()
-            else:
-                lsnr_pred = lsnr_model.query(lsnr_prompt).upper()
 
-            # Include listener history in the MToM prompt
-            lsnr_history = [entry["lsnr_trial_record"] for entry in trials_Records[:t]] if t > 0 else []
-            lsnr_history_flat = list(chain.from_iterable(lsnr_history))  # Flatten history
+            lsnr_pred = lsnr_pred.strip()
 
-            # Step 2: Listener MToM model provides feedback on the initial prediction
-            lsnr_mtom_prompt = [
-            selected_prompts["lsnr_mtom_prompt"],
-            f"Speaker description: {refined_msg}",
-            f"Listener prediction: {lsnr_pred}"
-            ] + lsnr_history_flat
-            
-            lsnr_feedback = lsnr_mtom_model.query(lsnr_mtom_prompt, lsnr_trial_imgs_lsnr_view).strip()
-
-            # Step 3: Listener generates a new refined prediction incorporating MToM feedback
-            
-            listener_MToM_addon_prompt = [
-            selected_prompts["lsnr_mtom_addon"],
-            f"Target image description: {refined_msg}",
-            f"Original prediction: {lsnr_pred}",
-            f"Feedback: {lsnr_feedback}"
-            ] + lsnr_history_flat
-
-            refined_pred = lsnr_model.query(listener_MToM_addon_prompt, lsnr_trial_imgs_lsnr_view).lower()
-
-            # Update the listener trial prompt with the refined prediction
-            lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(lsnr_trial_prompt, refined_pred)
-
-            # Save the refined prediction
+            lsnr_trial_prompt = lsnr_model.update_with_lsnr_pred(lsnr_trial_prompt, lsnr_pred)
             R_t["tgt_label_for_lsnr"] = tgt_label_for_lsnr
-            R_t["lsnr_pred"] = refined_pred
+            R_t["lsnr_pred"] = lsnr_pred
 
-            print(f"Listener Initial Prediction: {lsnr_pred}")
-            print(f"Listener MToM Feedback: {lsnr_feedback}")
-            print(f"Listener Refined Prediction: {refined_pred}")
-
-
-
-
-
+            print(f"Listener Prediction: {lsnr_pred}")
             try:
-                pred_fn = lsnr_trial_imgs[
-                    lsnr_model.model_args.label_space.index(lsnr_pred)
-                ]["filename"]
+                pred_fn = lsnr_trial_imgs[lsnr_model.model_args.label_space.index(lsnr_pred)]["filename"]
             except ValueError:
                 pred_fn = "invalid"
+
             lsnr_feedback_final = lsnr_model.get_lsnr_feedback(
-                refined_pred, lsnr_tgt_img, lsnr_trial_imgs, gen_msg
+                lsnr_pred, lsnr_tgt_img, lsnr_trial_imgs, gen_msg
             )
             lsnr_trial_prompt.append(lsnr_feedback_final)
-            
-            #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
-        # get speaker feedback
         if spkr_exp_args.model_type != "Human":
-            spkr_feedback = spkr_model.get_spkr_feedback(
+            spkr_feedback_msg = spkr_model.get_spkr_feedback(
                 pred_fn, spkr_tgt_img, spkr_trial_imgs
             )
+            spkr_trial_prompt.append(spkr_feedback_msg)
 
-            spkr_trial_prompt.append(spkr_feedback)
-
+        # Print info
         things_to_print = []
-
         if spkr_exp_args.model_type != "Human":
             things_to_print.extend(
                 [
                     {"Gen_msg": refined_msg},
                     {"Human_msg": human_msg},
-                    {"Tgt_fn": spkr_tgt_img["filename"]},
+                    {"Tgt_fn": spkr_tgt_img["filename"] if spkr_tgt_img else tgt_fn},
                 ]
             )
         else:
@@ -280,7 +258,7 @@ def eval_loop(
             things_to_print.extend(
                 [
                     {"Pred_fn": pred_fn},
-                    {"Pred_label": refined_pred},
+                    {"Pred_label": R_t["lsnr_pred"]},
                     {"Tgt_label": tgt_label_for_lsnr},
                 ]
             )
@@ -289,36 +267,22 @@ def eval_loop(
 
         R_t["spkr_trial_record"] = spkr_trial_prompt
         R_t["lsnr_trial_record"] = lsnr_trial_prompt
-            
-        print("\n")
-        print(f"Trial {t} DEBUG \n")
 
+        print("\n")
+        print(f"Trial {t+1} DEBUG \n")
         print("SPEAKER")
         print(f"Speaker Prompt 1: {spkr_prompt}\n")
         print(f"Speaker message 1: {gen_msg}\n\n")
-        
         print(f"SpeakerMToM prompt: {spkr_mtom_prompt}\n")
         print(f"SpeakerMToM message: {speaker_feedback}\n\n")
-        
-        
         print(f"Speaker Prompt 2: {speaker_MToM_addon_prompt}\n")
         print(f"Speaker Refined Message: {refined_msg}\n\n")
 
         print("LISTENER")
         print(f"Listener Prompt 1: {lsnr_prompt}\n")
-        print(f"Listener message 1: {lsnr_pred}\n\n")
-        
-        print(f"ListenerMToM prompt: {lsnr_mtom_prompt}\n")
-        print(f"ListenerMToM message: {lsnr_feedback}\n\n")
-        
-        
-        print(f"Listener Prompt 2: {listener_MToM_addon_prompt}\n")
-        print(f"Listener final answer: {refined_pred}\n\n")
-
-
+        print(f"Listener message 1: {R_t['lsnr_pred']}\n\n")
 
         print("---------------------------------------------------------------------- \n")
-
 
     return trials_Records, spkr_prompt, lsnr_prompt
 
@@ -337,7 +301,6 @@ def run_test(
     #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
     spkr_mtom_model,
-    lsnr_mtom_model,
 
     #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
@@ -413,7 +376,6 @@ def run_test(
             #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
             spkr_mtom_model=spkr_mtom_model,
-            lsnr_mtom_model=lsnr_mtom_model,
 
             #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
@@ -479,7 +441,6 @@ def main():
 
     # Command-line argument, even if we are probably only using one
     parser.add_argument("--spkr_mtom_ckpt", type=str, default="path_to_spkr_mtom_model")
-    parser.add_argument("--lsnr_mtom_ckpt", type=str, default="path_to_lsnr_mtom_model")
 
     #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
     
@@ -525,7 +486,7 @@ def main():
     ) 
     parser.add_argument("--exp_name", type=str, default="")
     parser.add_argument(
-        "--num_of_trials", type=int, default=5
+        "--num_of_trials", type=int, default=24
     )  # can use smaller numbers for debugging
 
     args = parser.parse_args()
@@ -608,16 +569,7 @@ def main():
         )
     )
 
-    lsnr_mtom_model = LlavaModel(
-        ModelArgs(
-            role="lsnr_mtom",
-            model_ckpt="liuhaotian/llava-v1.6-vicuna-7b",
-            max_output_tokens=30,
-            img_mode="PIL",
-            label_space=["top left", "top right", "bottom left", "bottom right"],
-            intro_text=lsnr_mtom_intro_text
-    )
-    )
+
 
     #MODIFICA ----------------------------------------------------------------------------------------------------------------------------
 
@@ -657,7 +609,6 @@ def main():
         spkr_model=spkr_model,
         lsnr_model=lsnr_model,
         spkr_mtom_model=spkr_mtom_model,
-        lsnr_mtom_model=lsnr_mtom_model,
         img_mask=img_mask,
         img_mask_url=img_mask_url,
         img_mask_base64=img_mask_base64,
