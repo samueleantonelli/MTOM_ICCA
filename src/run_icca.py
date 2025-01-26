@@ -280,6 +280,7 @@ def eval_loop(
 
         print("LISTENER")
         print(f"Listener Prompt 1: {lsnr_prompt}\n")
+        
         print(f"Listener message 1: {R_t['lsnr_pred']}\n\n")
 
         print("---------------------------------------------------------------------- \n")
