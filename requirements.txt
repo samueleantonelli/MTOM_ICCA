@@ -8,9 +8,11 @@ pillow==10.1.0
 pandas==2.0.3
 spacy
 llava
+einops
+sentencepiece
 
 
-#other models needed
+#other models 
 openai
 google.generativeai
 anthropic
