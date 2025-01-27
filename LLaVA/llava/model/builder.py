@@ -30,7 +30,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         kwargs['device_map'] = {"": device}
 
     if load_8bit:
-        kwargs['load_in_8bit'] = False
+        kwargs['load_in_8bit'] = True
     elif load_4bit:
         kwargs['load_in_4bit'] = True
         kwargs['quantization_config'] = BitsAndBytesConfig(
