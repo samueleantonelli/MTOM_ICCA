@@ -122,7 +122,7 @@ def eval_loop(
             # Step 2: MToM feedback
             # Build MToM prompt the same way, but with truncated history
             mtom_prompts_path = "/mnt/cimec-storage6/users/simone.baratella/GLPCOND/MTOM_ICCA/src/args/mtom_prompts.json"
-            with open(mtom_prompts_path, "r") as f:
+            with open(mtom_prompts_path, "r", encoding="utf-8") as f:
                 mtom_prompts = json.load(f)
 
             condition_val = args.condition
@@ -133,24 +133,28 @@ def eval_loop(
 
             spkr_mtom_prompt = [
                 selected_prompts["spkr_mtom_prompt"]
-            ] + spkr_history_flat
+            ] 
 
-            spkr_mtom_prompt.append(f"Description: {gen_msg}")
+            spkr_mtom_prompt.append(f"Previous rounds history:{spkr_history_flat}")
 
-            spkr_mtom_prompt.append("My short feedback on this description is: ")
+            spkr_mtom_prompt.append(f"Current description: {gen_msg}")
+
+            spkr_mtom_prompt.append("My feedback on this description is: ")
 
             speaker_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
 
             # Step 3: refine
             speaker_MToM_addon_prompt = [
                 selected_prompts["spkr_mtom_addon"],
-            ] + spkr_history_flat
-
+            ]
+            
+            speaker_MToM_addon_prompt.append(f"Previous rounds history:{spkr_history_flat}")
+            
             speaker_MToM_addon_prompt.append(f"Previous description: {gen_msg}")
             
-            speaker_MToM_addon_prompt.append(f"Other player Feedback: {speaker_feedback}")
+            speaker_MToM_addon_prompt.append(f"Feedback: {speaker_feedback}")
             
-            speaker_MToM_addon_prompt.append("implementing the feedback my final description is: ")
+            speaker_MToM_addon_prompt.append("Implementing the feedback my final description is: ")
 
                                              
 
