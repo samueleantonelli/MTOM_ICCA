@@ -105,8 +105,10 @@ def eval_loop(
             # Gather all previous speaker trial records [0..t-1], Then keep only the last 5 rounds to avoid super-long prompt
             if t > 0:
                 spkr_history_all = [entry["spkr_trial_record"] for entry in trials_Records[:t]]
+                lsnr_history_all = [entry["lsnr_trial_record"] for entry in trials_Records[:t]]
             else:
                 spkr_history_all = []
+                lsnr_history_all = []
 
             # flatten each set of lines
             spkr_history_flat = list(chain.from_iterable(spkr_history_all))
@@ -121,7 +123,7 @@ def eval_loop(
 
             # Step 2: MToM feedback
             # Build MToM prompt the same way, but with truncated history
-            mtom_prompts_path = "/mnt/cimec-storage6/users/simone.baratella/GLPCOND/MTOM_ICCA/src/args/mtom_prompts.json"
+            mtom_prompts_path = "/mnt/cimec-storage6/users/samuele.antonelli/mtomicca/MTOM_ICCA/src/args/mtom_prompts.json"
             with open(mtom_prompts_path, "r", encoding="utf-8") as f:
                 mtom_prompts = json.load(f)
 
@@ -573,6 +575,9 @@ def main():
             intro_text=spkr_mtom_intro_text
         )
     )
+    print("-------------------------------------------------------"
+          f"Image Masking Enabled: {lsnr_exp_args.img_mask}")
+
 
 
 

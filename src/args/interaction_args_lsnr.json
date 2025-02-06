@@ -1,6 +1,6 @@
 {   
     "has_intro": true,
-    "img_once": true,
+    "img_once": false ,
     "do_shuffle": false,
     "no_history": false,
     "img_mask": false,

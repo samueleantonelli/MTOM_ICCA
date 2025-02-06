@@ -1,0 +1,89 @@
+{
+    "bottom left": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 6
+    },
+    "bottom right": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 6
+    },
+    "top left": {
+        "precision": 0.07692307692307693,
+        "recall": 0.16666666666666666,
+        "f1-score": 0.10526315789473684,
+        "support": 6
+    },
+    "top right": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 6
+    },
+    "accuracy": 0.041666666666666664,
+    "macro avg": {
+        "precision": 0.019230769230769232,
+        "recall": 0.041666666666666664,
+        "f1-score": 0.02631578947368421,
+        "support": 24
+    },
+    "weighted avg": {
+        "precision": 0.019230769230769232,
+        "recall": 0.041666666666666664,
+        "f1-score": 0.02631578947368421,
+        "support": 24
+    },
+    "spkr_model_arg": {
+        "role": "spkr",
+        "model_ckpt": "liuhaotian/llava-v1.6-vicuna-7b",
+        "max_output_tokens": 30,
+        "img_mode": "PIL",
+        "label_space": [
+            "top left",
+            "top right",
+            "bottom left",
+            "bottom right"
+        ],
+        "intro_text": "Play a game with me and a third player (the listener). This game consists of multiple rounds in which you interact with me and a listener on the same collage of 4 images. In each round, I will refer to one of the images as the target, by saying their location in the collage. You should generate a message to communicate the target to the listener without mentioning this location. The listener will then guess the target. I will tell you which image the listener guessed so you may adjust your message based on the listener's performance.\n\nFocus on the content of the images, not their locations in the collage. In other words, don't include phrases like top left, top right, bottom left, bottom right in your message. Keep each message under 20 words. Your reply should only contain your message.",
+        "altnernating_roles": true
+    },
+    "lsnr_model_args": {
+        "role": "lsnr",
+        "model_ckpt": "liuhaotian/llava-v1.6-vicuna-7b",
+        "max_output_tokens": 5,
+        "img_mode": "PIL",
+        "label_space": [
+            "top left",
+            "top right",
+            "bottom left",
+            "bottom right"
+        ],
+        "intro_text": " you will play a game with multiple rounds involving the same set of images. In each round, I will refer to one of the images with a message. You will guess which image I'm referring to. If present, the history of previous rounds may help you better understand how I refer to specific images. In each round, answer with the image's location in the collage, i.e. top left, top right, bottom left, bottom right.",
+        "altnernating_roles": true
+    },
+    "spkr_exp_args": {
+        "has_intro": true,
+        "do_shuffle": false,
+        "max_hist_len": null,
+        "first_round_eg": false,
+        "model_type": "llava",
+        "img_once": false,
+        "img_mask": false,
+        "no_history": false,
+        "misleading_trials": null
+    },
+    "lsnr_exp_args": {
+        "has_intro": true,
+        "do_shuffle": false,
+        "max_hist_len": null,
+        "first_round_eg": false,
+        "model_type": "llava",
+        "img_once": false,
+        "img_mask": false,
+        "no_history": false,
+        "misleading_trials": []
+    }
+}
