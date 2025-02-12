@@ -1,4 +1,5 @@
-# %%
+#Code with changes to add history updates on listener feedbacks (lsnr_history) to the MToM pipeline.
+
 import sys
 import os
 
@@ -32,8 +33,6 @@ def eval_loop(
     sleep_time=0,
     args=None,
 ):
-
-    
 
     random.seed(random_seed)
     random_seeds = random.sample(range(0, 1000), iters)
@@ -102,7 +101,7 @@ def eval_loop(
         # MToM pipeline
         if spkr_exp_args.model_type != "Human":
             
-            # Gather all previous speaker trial records [0..t-1], Then keep only the last 5 rounds to avoid super-long prompt
+            # Gather all previous speaker trial records [0..t-1], Then keep only the last 2 rounds
             if t > 0:
                 spkr_history_all = [entry["spkr_trial_record"] for entry in trials_Records[:t]]
                 lsnr_history_all = [entry["lsnr_trial_record"] for entry in trials_Records[:t]]
@@ -110,19 +109,19 @@ def eval_loop(
                 spkr_history_all = []
                 lsnr_history_all = []
 
-            # flatten each set of lines
+            # flatten speaker lines
             spkr_history_flat = list(chain.from_iterable(spkr_history_all))
-
-            # limit to last 5 "round blocks" (not lines).
-            # Each round block is spkr_trial_record: a list of strings. 
-            # We'll do it round by round, not line by line:
-            # if we have N rounds in spkr_history_all, keep only the last 5
             if len(spkr_history_all) > 5:
                 spkr_history_all = spkr_history_all[-5:]
                 spkr_history_flat = list(chain.from_iterable(spkr_history_all))
 
+            # flatten listener lines
+            lsnr_history_flat = list(chain.from_iterable(lsnr_history_all))
+            if len(lsnr_history_all) > 5:
+                lsnr_history_all = lsnr_history_all[-5:]
+                lsnr_history_flat = list(chain.from_iterable(lsnr_history_all))
+
             # Step 2: MToM feedback
-            # Build MToM prompt the same way, but with truncated history
             mtom_prompts_path = "/mnt/cimec-storage6/users/samuele.antonelli/mtomicca/MTOM_ICCA/src/args/mtom_prompts.json"
             with open(mtom_prompts_path, "r", encoding="utf-8") as f:
                 mtom_prompts = json.load(f)
@@ -135,12 +134,13 @@ def eval_loop(
 
             spkr_mtom_prompt = [
                 selected_prompts["spkr_mtom_prompt"]
-            ] 
+            ]
 
+            # Incorporate listener feedback history as well
             spkr_mtom_prompt.append(f"Previous rounds history:{spkr_history_flat}")
+            spkr_mtom_prompt.append(f"Listener feedback from previous rounds: {lsnr_history_flat}")
 
             spkr_mtom_prompt.append(f"Current description: {gen_msg}")
-
             spkr_mtom_prompt.append("My feedback on this description is: ")
 
             speaker_feedback = spkr_mtom_model.query(spkr_mtom_prompt, spkr_trial_imgs).strip()
@@ -149,17 +149,12 @@ def eval_loop(
             speaker_MToM_addon_prompt = [
                 selected_prompts["spkr_mtom_addon"],
             ]
-            
+
             speaker_MToM_addon_prompt.append(f"Previous rounds history:{spkr_history_flat}")
-            
+            speaker_MToM_addon_prompt.append(f"Listener feedback from previous rounds: {lsnr_history_flat}")
             speaker_MToM_addon_prompt.append(f"Previous description: {gen_msg}")
-            
             speaker_MToM_addon_prompt.append(f"Feedback: {speaker_feedback}")
-            
             speaker_MToM_addon_prompt.append("Implementing the feedback my final description is: ")
-
-                                             
-
 
             refined_msg = spkr_model.query(speaker_MToM_addon_prompt, spkr_trial_imgs).strip()
 
@@ -575,7 +570,7 @@ def main():
             intro_text=spkr_mtom_intro_text
         )
     )
-    print("-------------------------------------------------------"
+    print("-------------------------------------------------------"\
           f"Image Masking Enabled: {lsnr_exp_args.img_mask}")
 
 
