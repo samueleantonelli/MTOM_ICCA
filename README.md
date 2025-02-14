@@ -9,7 +9,7 @@ This code builds on ICCA by Hua and Artzi (2024): https://github.com/lil-lab/ICC
 2. Copy the git directory: 
 
    ```bash
-  https://github.com/samueleantonelli/MTOM_ICCA.git
+   git clone https://github.com/samueleantonelli/MTOM_ICCA.git
 
 3. Install requirements by running:
    ```bash
